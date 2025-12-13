@@ -4,16 +4,23 @@
  * Description: Handles posting changelog updates from GitHub to a custom post type in WordPress.
  * Version: 1.0
  * Author: James Welbes
+ *
+ * @package ReleaseWP
  */
 
 namespace ReleaseWP;
 
 require_once plugin_dir_path( __FILE__ ) . 'Parsedown.php';
 
-// Register settings page
+// Register settings page.
 add_action( 'admin_menu', __NAMESPACE__ . '\\register_settings_page' );
 add_action( 'admin_init', __NAMESPACE__ . '\\register_settings' );
 
+/**
+ * Register the settings page in WordPress admin menu.
+ *
+ * @return void
+ */
 function register_settings_page() {
 	add_options_page(
 		'ReleaseWP Settings',
@@ -24,6 +31,11 @@ function register_settings_page() {
 	);
 }
 
+/**
+ * Register plugin settings and settings fields.
+ *
+ * @return void
+ */
 function register_settings() {
 	register_setting( 'releasewp_settings', 'releasewp_post_type' );
 	register_setting( 'releasewp_settings', 'releasewp_title_template' );
@@ -52,6 +64,11 @@ function register_settings() {
 	);
 }
 
+/**
+ * Render the post type selection field.
+ *
+ * @return void
+ */
 function render_post_type_field() {
 	$selected_post_type = get_option( 'releasewp_post_type', 'post' );
 	$post_types         = get_post_types( array( 'public' => true ), 'objects' );
@@ -69,15 +86,20 @@ function render_post_type_field() {
 	echo '<p class="description">Select the post type where changelog updates will be published.</p>';
 }
 
+/**
+ * Render the title template input field.
+ *
+ * @return void
+ */
 function render_title_template_field() {
 	$template = get_option( 'releasewp_title_template', 'Version %version%' );
 	?>
-	<input type="text" 
-	       name="releasewp_title_template" 
-	       id="releasewp_title_template" 
-	       value="<?php echo esc_attr( $template ); ?>" 
-	       class="regular-text"
-	       placeholder="e.g., MyPlugin %version% is here!">
+	<input type="text"
+		name="releasewp_title_template"
+		id="releasewp_title_template"
+		value="<?php echo esc_attr( $template ); ?>"
+		class="regular-text"
+		placeholder="e.g., MyPlugin %version% is here!">
 	<p class="description">
 		Use <code>%version%</code> as a placeholder for the version number sent from GitHub.<br>
 		Examples: 
@@ -87,6 +109,11 @@ function render_title_template_field() {
 	<?php
 }
 
+/**
+ * Render the settings page.
+ *
+ * @return void
+ */
 function render_settings_page() {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
@@ -105,7 +132,7 @@ function render_settings_page() {
 	<?php
 }
 
-// Hook to handle POST request
+// Hook to handle POST request.
 add_action(
 	'rest_api_init',
 	function () {
@@ -123,23 +150,28 @@ add_action(
 	}
 );
 
-// Function to handle the POST request
+/**
+ * Handle the changelog update POST request.
+ *
+ * @param \WP_REST_Request $request The REST API request object.
+ * @return \WP_REST_Response Response indicating success or failure.
+ */
 function handle_changelog_update( \WP_REST_Request $request ) {
 	$title            = $request->get_param( 'title' );
 	$markdown_content = $request->get_param( 'content' );
 
-	// Convert Markdown to HTML
-	$Parsedown = new \Parsedown();
-	$content   = wp_kses_post( $Parsedown->text( $markdown_content ) );
+	// Convert Markdown to HTML.
+	$parsedown = new \Parsedown();
+	$content   = wp_kses_post( $parsedown->text( $markdown_content ) );
 
-	// Get the configured post type from settings
+	// Get the configured post type from settings.
 	$post_type = get_option( 'releasewp_post_type', 'post' );
 
-	// Apply title template (version number is expected from GitHub)
+	// Apply title template (version number is expected from GitHub).
 	$title_template = get_option( 'releasewp_title_template', 'Version %version%' );
 	$title          = str_replace( '%version%', $title, $title_template );
 
-	// Create post array
+	// Create post array.
 	$new_post = array(
 		'post_title'   => wp_strip_all_tags( $title ),
 		'post_content' => $content,
@@ -147,14 +179,14 @@ function handle_changelog_update( \WP_REST_Request $request ) {
 		'post_type'    => $post_type,
 	);
 
-	// Insert the post into the database and check for errors
+	// Insert the post into the database and check for errors.
 	$post_id = wp_insert_post( $new_post );
 
 	if ( is_wp_error( $post_id ) ) {
-		// If there's an error, return a REST response indicating failure
+		// If there's an error, return a REST response indicating failure.
 		return new \WP_REST_Response( 'Error creating post', 500 );
 	}
 
-	// If successful, return a success message
+	// If successful, return a success message.
 	return new \WP_REST_Response( 'Post Created', 200 );
 }

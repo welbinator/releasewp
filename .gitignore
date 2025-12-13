@@ -1,0 +1,28 @@
+# Composer
+/vendor/
+composer.lock
+
+# Node (if added later)
+node_modules/
+package-lock.json
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# PHP
+*.log
+.phpcs-cache
+.phpunit.result.cache
+
+# Build/dist files
+/build/
+/dist/
+
+# Environment files
+.env
+.env.local

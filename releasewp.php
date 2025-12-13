@@ -26,6 +26,7 @@ function register_settings_page() {
 
 function register_settings() {
 	register_setting( 'releasewp_settings', 'releasewp_post_type' );
+	register_setting( 'releasewp_settings', 'releasewp_title_template' );
 
 	add_settings_section(
 		'releasewp_main_section',
@@ -38,6 +39,14 @@ function register_settings() {
 		'releasewp_post_type',
 		'Target Post Type',
 		__NAMESPACE__ . '\\render_post_type_field',
+		'releasewp-settings',
+		'releasewp_main_section'
+	);
+
+	add_settings_field(
+		'releasewp_title_template',
+		'Title Template',
+		__NAMESPACE__ . '\\render_title_template_field',
 		'releasewp-settings',
 		'releasewp_main_section'
 	);
@@ -58,6 +67,24 @@ function render_post_type_field() {
 	}
 	echo '</select>';
 	echo '<p class="description">Select the post type where changelog updates will be published.</p>';
+}
+
+function render_title_template_field() {
+	$template = get_option( 'releasewp_title_template', 'Version %version%' );
+	?>
+	<input type="text" 
+	       name="releasewp_title_template" 
+	       id="releasewp_title_template" 
+	       value="<?php echo esc_attr( $template ); ?>" 
+	       class="regular-text"
+	       placeholder="e.g., MyPlugin %version% is here!">
+	<p class="description">
+		Use <code>%version%</code> as a placeholder for the version number sent from GitHub.<br>
+		Examples: 
+		<code>MyPlugin %version% is here!</code> or 
+		<code>Version %version% Released</code>
+	</p>
+	<?php
 }
 
 function render_settings_page() {
@@ -107,6 +134,10 @@ function handle_changelog_update( \WP_REST_Request $request ) {
 
 	// Get the configured post type from settings
 	$post_type = get_option( 'releasewp_post_type', 'post' );
+
+	// Apply title template (version number is expected from GitHub)
+	$title_template = get_option( 'releasewp_title_template', 'Version %version%' );
+	$title          = str_replace( '%version%', $title, $title_template );
 
 	// Create post array
 	$new_post = array(

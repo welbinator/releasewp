@@ -9,7 +9,7 @@ ReleaseWP creates a REST API endpoint on your WordPress site that accepts change
 1. Receives a title and Markdown content via POST request
 2. Converts the Markdown to HTML using Parsedown
 3. Sanitizes the content for security
-4. Creates a new WordPress post with the custom post type `update`
+4. Creates a new WordPress post with your configured post type
 5. Returns success/error status
 
 **Perfect for**: Automatically publishing release notes, changelogs, or version updates from your GitHub repository to your WordPress site.
@@ -18,14 +18,15 @@ ReleaseWP creates a REST API endpoint on your WordPress site that accepts change
 
 - WordPress 5.0 or higher
 - PHP 7.0 or higher
-- A custom post type named `update` registered in WordPress
 - WordPress user with `edit_posts` capability
 
 ## Installation
 
 1. Upload the `releasewp` folder to `/wp-content/plugins/`
 2. Activate the plugin through the 'Plugins' menu in WordPress
-3. Ensure you have a custom post type named `update` registered (or modify line 47 in `releasewp.php` to use your preferred post type)
+3. Go to **Settings → ReleaseWP** to configure:
+   - **Target Post Type**: Select which post type to use (defaults to standard Posts)
+   - **Title Template**: Format post titles using `%version%` placeholder (defaults to "Version %version%")
 
 ## GitHub Integration Setup
 
@@ -92,7 +93,8 @@ jobs:
     - name: Convert Extracted Changelog to JSON
       run: |
         VERSION="${{ github.event.inputs.version }}"
-        jq -Rs --arg version "$VERSION" '{title: ("Release " + $version), content: .}' specific-changelog.md > changelog.json
+        # Send just the version number - WordPress will format the title
+        jq -Rs --arg version "$VERSION" '{title: $version, content: .}' specific-changelog.md > changelog.json
 
     - name: Update WordPress
       env:
@@ -128,8 +130,24 @@ Your `CHANGELOG.md` should follow this format:
 - Updated something
 ```
 
-## Usage
+## Plugin Configuration
 
+After installation, configure the plugin:
+## Plugin Configuration
+
+After installation, configure the plugin in **Settings → ReleaseWP**:
+
+1. **Target Post Type**: Select which post type to create (Posts, Pages, or any custom post type)
+2. **Title Template**: Customize how post titles are formatted
+   - Use `%version%` as a placeholder for the version number from GitHub
+   - Default: `Version %version%` (e.g., "Version 1.2.0")
+   - Examples:
+     - `MyPlugin %version% is here!` → "MyPlugin 1.2.0 is here!"
+     - `%version% Release Notes` → "1.2.0 Release Notes"
+     - `What's New in %version%` → "What's New in 1.2.0"
+3. Click **Save Settings**
+
+The GitHub Action will send just the version number (e.g., "1.2.0"), and WordPress will format it according to your template.
 ### Manual Trigger (Recommended)
 
 1. Go to your GitHub repository

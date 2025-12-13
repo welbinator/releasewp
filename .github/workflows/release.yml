@@ -1,0 +1,49 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create temporary directory
+      run: |
+        mkdir temp_dir
+
+    - name: Copy files to temporary directory
+      run: |
+        find . -maxdepth 1 -not -name 'temp_dir' -not -name '.' -not -name '.git' -not -name '.github' -exec cp -r {} temp_dir/ \;
+
+    - name: Rename directory
+      run: |
+        mv temp_dir releasewp
+
+    - name: Zip the folder
+      run: |
+        zip -r releasewp-${{ github.event.inputs.tag }}.zip releasewp \
+        -x "*.git/*" "*.github/*" \
+        "releasewp/composer.json" "releasewp/composer.lock" \
+        "releasewp/package.json" "releasewp/package-lock.json" \
+        "releasewp/phpstan.neon" "releasewp/phpstan-baseline.neon" \
+        "releasewp/postcss.config.js" "releasewp/tailwind.config.js" \
+        "releasewp/gutenberg-market.php" "releasewp/.gitignore" \
+        "releasewp/webpack.config.js" "releasewp/src/*"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: releasewp-${{ github.event.inputs.tag }}.zip
+        tag_name: ${{ github.event.inputs.tag }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+permissions:
+  contents: write

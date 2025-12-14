@@ -39,6 +39,7 @@ function register_settings_page() {
 function register_settings() {
 	register_setting( 'releasewp_settings', 'releasewp_post_type' );
 	register_setting( 'releasewp_settings', 'releasewp_title_template' );
+	register_setting( 'releasewp_settings', 'releasewp_heading_template' );
 
 	add_settings_section(
 		'releasewp_main_section',
@@ -59,6 +60,14 @@ function register_settings() {
 		'releasewp_title_template',
 		'Title Template',
 		__NAMESPACE__ . '\\render_title_template_field',
+		'releasewp-settings',
+		'releasewp_main_section'
+	);
+
+	add_settings_field(
+		'releasewp_heading_template',
+		'Content Heading Template',
+		__NAMESPACE__ . '\\render_heading_template_field',
 		'releasewp-settings',
 		'releasewp_main_section'
 	);
@@ -105,6 +114,30 @@ function render_title_template_field() {
 		Examples: 
 		<code>MyPlugin %version% is here!</code> or 
 		<code>Version %version% Released</code>
+	</p>
+	<?php
+}
+
+/**
+ * Render the heading template input field.
+ *
+ * @return void
+ */
+function render_heading_template_field() {
+	$template = get_option( 'releasewp_heading_template', '%version% Details:' );
+	?>
+	<input type="text"
+		name="releasewp_heading_template"
+		id="releasewp_heading_template"
+		value="<?php echo esc_attr( $template ); ?>"
+		class="regular-text"
+		placeholder="e.g., %version% Details:">
+	<p class="description">
+		Use <code>%version%</code> as a placeholder for the version number.<br>
+		This heading will appear at the top of the post content.<br>
+		Examples:
+		<code>%version% Details:</code> or
+		<code>What's New in %version%</code>
 	</p>
 	<?php
 }
@@ -170,6 +203,11 @@ function handle_changelog_update( \WP_REST_Request $request ) {
 	// Apply title template (version number is expected from GitHub).
 	$title_template = get_option( 'releasewp_title_template', 'Version %version%' );
 	$title          = str_replace( '%version%', $title, $title_template );
+
+	// Apply heading template to content.
+	$heading_template = get_option( 'releasewp_heading_template', '%version% Details:' );
+	$heading          = str_replace( '%version%', $request->get_param( 'title' ), $heading_template );
+	$content          = '<h2>' . esc_html( $heading ) . '</h2>' . $content;
 
 	// Create post array.
 	$new_post = array(

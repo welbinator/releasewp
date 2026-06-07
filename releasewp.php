@@ -200,7 +200,18 @@ function render_webhook_secret_field(): void {
 }
 
 /**
- * Render the settings page.
+ * Get the current admin tab, validated against allowed values.
+ *
+ * @return string The active tab slug: 'setup' or 'settings'.
+ */
+function get_active_tab(): string {
+	// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- tab param controls display only; no data is processed.
+	$tab = isset( $_GET['tab'] ) ? sanitize_key( wp_unslash( (string) $_GET['tab'] ) ) : 'setup';
+	return in_array( $tab, array( 'setup', 'settings' ), true ) ? $tab : 'setup';
+}
+
+/**
+ * Render the settings page with tabbed navigation.
  *
  * @return void
  */
@@ -208,16 +219,246 @@ function render_settings_page(): void {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
+
+	$active_tab   = get_active_tab();
+	$settings_url = admin_url( 'options-general.php?page=releasewp-settings' );
 	?>
 	<div class="wrap">
 		<h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
-		<form action="options.php" method="post">
-			<?php
-			settings_fields( 'releasewp_settings' );
-			do_settings_sections( 'releasewp-settings' );
-			submit_button( 'Save Settings' );
-			?>
-		</form>
+
+		<nav class="nav-tab-wrapper">
+			<a href="<?php echo esc_url( add_query_arg( 'tab', 'setup', $settings_url ) ); ?>"
+				class="nav-tab<?php echo 'setup' === $active_tab ? ' nav-tab-active' : ''; ?>">
+				<?php esc_html_e( 'Setup Guide', 'releasewp' ); ?>
+			</a>
+			<a href="<?php echo esc_url( add_query_arg( 'tab', 'settings', $settings_url ) ); ?>"
+				class="nav-tab<?php echo 'settings' === $active_tab ? ' nav-tab-active' : ''; ?>">
+				<?php esc_html_e( 'Settings', 'releasewp' ); ?>
+			</a>
+		</nav>
+
+		<?php if ( 'setup' === $active_tab ) : ?>
+			<?php render_setup_tab(); ?>
+		<?php else : ?>
+			<?php render_settings_tab(); ?>
+		<?php endif; ?>
+	</div>
+	<?php
+}
+
+/**
+ * Render the Settings tab — the options form.
+ *
+ * @return void
+ */
+function render_settings_tab(): void {
+	?>
+	<form action="options.php" method="post" style="margin-top: 20px;">
+		<?php
+		settings_fields( 'releasewp_settings' );
+		do_settings_sections( 'releasewp-settings' );
+		submit_button( 'Save Settings' );
+		?>
+	</form>
+	<?php
+}
+
+/**
+ * Render the Setup Guide tab — step-by-step instructions for connecting GitHub.
+ *
+ * @return void
+ */
+function render_setup_tab(): void {
+	$endpoint_url = rest_url( 'releasewp/v1/post-update' );
+	$settings_url = admin_url( 'options-general.php?page=releasewp-settings&tab=settings' );
+	$has_secret   = '' !== (string) get_option( 'releasewp_webhook_secret', '' );
+
+	// Nowdoc: no PHP interpolation — ${{ }}, $VARS, backslashes, and quotes are all literal.
+	$workflow_yaml = <<<'YAML'
+name: Post Release to WordPress
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  post-to-wordpress:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send release notes to WordPress
+        env:
+          RELEASEWP_SECRET: ${{ secrets.RELEASEWP_SECRET }}
+          RELEASEWP_ENDPOINT: ${{ secrets.RELEASEWP_ENDPOINT }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          # Write the JSON payload to a file so the signature covers the exact bytes sent
+          jq -n \
+            --arg title "$RELEASE_TAG" \
+            --arg content "$RELEASE_BODY" \
+            '{title: $title, content: $content}' > /tmp/payload.json
+
+          # Compute HMAC-SHA256 signature over the payload file
+          SIGNATURE="sha256=$(openssl dgst -sha256 -hmac "$RELEASEWP_SECRET" /tmp/payload.json | awk '{print $NF}')"
+
+          # POST to WordPress with the signature header
+          curl -sf -X POST "$RELEASEWP_ENDPOINT" \
+            -H "Content-Type: application/json" \
+            -H "X-Hub-Signature-256: $SIGNATURE" \
+            -d @/tmp/payload.json
+YAML;
+
+	?>
+	<style>
+	.rwp-overview {
+		background: #fff;
+		border: 1px solid #c3c4c7;
+		border-left: 4px solid #2271b1;
+		border-radius: 4px;
+		padding: 16px 20px;
+		margin: 20px 0;
+	}
+	.rwp-overview p { margin: 6px 0; font-size: 13px; }
+	.rwp-steps { margin-top: 4px; }
+	.rwp-step {
+		background: #fff;
+		border: 1px solid #c3c4c7;
+		border-radius: 4px;
+		padding: 20px 24px;
+		margin-bottom: 14px;
+	}
+	.rwp-step h3 {
+		margin: 0 0 10px;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		font-size: 14px;
+	}
+	.rwp-num {
+		background: #2271b1;
+		color: #fff;
+		border-radius: 50%;
+		min-width: 26px;
+		height: 26px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 12px;
+		font-weight: 700;
+		flex-shrink: 0;
+	}
+	.rwp-step p { margin: 6px 0; font-size: 13px; }
+	.rwp-code {
+		background: #1e1e1e;
+		color: #d4d4d4;
+		border-radius: 4px;
+		padding: 14px 16px;
+		font-family: Consolas, 'Courier New', monospace;
+		font-size: 12px;
+		line-height: 1.65;
+		overflow-x: auto;
+		margin: 10px 0 4px;
+		white-space: pre;
+	}
+	.rwp-ic {
+		font-family: Consolas, 'Courier New', monospace;
+		font-size: 12px;
+		background: #f0f0f1;
+		padding: 1px 5px;
+		border-radius: 3px;
+		word-break: break-all;
+	}
+	.rwp-tip {
+		background: #f0f6fc;
+		border-left: 4px solid #2271b1;
+		padding: 9px 13px;
+		margin: 10px 0 0;
+		font-size: 12.5px;
+	}
+	.rwp-warn {
+		background: #fcf9e8;
+		border-left: 4px solid #dba617;
+		padding: 9px 13px;
+		margin: 10px 0 0;
+		font-size: 12.5px;
+	}
+	.rwp-done { color: #00a32a; font-size: 12px; font-weight: 600; margin-left: 4px; }
+	</style>
+
+	<div class="rwp-overview">
+		<p><strong><?php esc_html_e( 'How ReleaseWP works', 'releasewp' ); ?></strong></p>
+		<p><?php esc_html_e( 'When you publish a release on GitHub, a GitHub Actions workflow automatically sends the release title and notes to this WordPress site. ReleaseWP receives the request and creates a new post — no manual copy-pasting needed.', 'releasewp' ); ?></p>
+		<p><?php esc_html_e( 'The connection is secured with a shared secret. GitHub signs each outgoing request using that secret; WordPress verifies the signature and rejects anything that does not match. Only your GitHub repository can create posts through this endpoint.', 'releasewp' ); ?></p>
+	</div>
+
+	<div class="rwp-steps">
+
+		<div class="rwp-step">
+			<h3><span class="rwp-num">1</span><?php esc_html_e( 'Generate a webhook secret', 'releasewp' ); ?></h3>
+			<p><?php esc_html_e( 'You need a long, random string that only you know. Your GitHub Actions workflow will use it to sign each request; WordPress uses it to verify the signature. Run this in any terminal to generate one:', 'releasewp' ); ?></p>
+			<div class="rwp-code">openssl rand -hex 32</div>
+			<div class="rwp-tip"><?php esc_html_e( 'Copy the output — you will paste it in the next two steps.', 'releasewp' ); ?></div>
+		</div>
+
+		<div class="rwp-step">
+			<h3>
+				<span class="rwp-num">2</span>
+				<?php esc_html_e( 'Save the secret in WordPress', 'releasewp' ); ?>
+				<?php if ( $has_secret ) : ?>
+					<span class="rwp-done">&#10003; <?php esc_html_e( 'Done', 'releasewp' ); ?></span>
+				<?php endif; ?>
+			</h3>
+			<p>
+				<?php esc_html_e( 'Open the', 'releasewp' ); ?>
+				<a href="<?php echo esc_url( $settings_url ); ?>"><?php esc_html_e( 'Settings tab', 'releasewp' ); ?></a>
+				<?php esc_html_e( 'and paste your secret into the Webhook Secret field, then click Save Settings.', 'releasewp' ); ?>
+			</p>
+			<?php if ( ! $has_secret ) : ?>
+				<div class="rwp-warn"><?php esc_html_e( 'No secret saved yet. The endpoint will reject all requests until a secret is configured.', 'releasewp' ); ?></div>
+			<?php endif; ?>
+		</div>
+
+		<div class="rwp-step">
+			<h3><span class="rwp-num">3</span><?php esc_html_e( 'Add secrets to your GitHub repository', 'releasewp' ); ?></h3>
+			<p><?php esc_html_e( 'In your GitHub repository, go to Settings &#8594; Secrets and variables &#8594; Actions &#8594; New repository secret. Add both of these:', 'releasewp' ); ?></p>
+			<table class="widefat striped" style="margin-top: 12px; max-width: 640px;">
+				<thead>
+					<tr>
+						<th style="width: 220px;"><?php esc_html_e( 'Secret name', 'releasewp' ); ?></th>
+						<th><?php esc_html_e( 'Value', 'releasewp' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td><code>RELEASEWP_SECRET</code></td>
+						<td><?php esc_html_e( 'The secret string you generated in Step 1', 'releasewp' ); ?></td>
+					</tr>
+					<tr>
+						<td><code>RELEASEWP_ENDPOINT</code></td>
+						<td><span class="rwp-ic"><?php echo esc_html( $endpoint_url ); ?></span></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<div class="rwp-step">
+			<h3><span class="rwp-num">4</span><?php esc_html_e( 'Add the GitHub Actions workflow to your repository', 'releasewp' ); ?></h3>
+			<p>
+				<?php esc_html_e( 'Create this file in your repository:', 'releasewp' ); ?>
+				<code class="rwp-ic">.github/workflows/post-release-to-wordpress.yml</code>
+			</p>
+			<p><?php esc_html_e( 'Paste in the following content:', 'releasewp' ); ?></p>
+			<div class="rwp-code"><?php echo esc_html( $workflow_yaml ); ?></div>
+			<div class="rwp-tip"><?php esc_html_e( 'This workflow fires automatically every time you publish a GitHub release. It builds a signed JSON request containing the release tag and notes, then sends it to WordPress.', 'releasewp' ); ?></div>
+		</div>
+
+		<div class="rwp-step">
+			<h3><span class="rwp-num">5</span><?php esc_html_e( 'Publish a release and verify', 'releasewp' ); ?></h3>
+			<p><?php esc_html_e( 'Go to your GitHub repository &#8594; Releases &#8594; Draft a new release. Set a tag (e.g. v1.0.0), write release notes in the description, and click Publish release.', 'releasewp' ); ?></p>
+			<p><?php esc_html_e( 'Within a few seconds the Actions workflow will run and a new post should appear on your WordPress site.', 'releasewp' ); ?></p>
+			<div class="rwp-tip"><?php esc_html_e( 'Not seeing the post? Check the Settings tab to confirm the correct post type is selected, then check your GitHub Actions run log for any errors.', 'releasewp' ); ?></div>
+		</div>
+
 	</div>
 	<?php
 }

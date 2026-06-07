@@ -2,13 +2,15 @@
 /**
  * Plugin Name: ReleaseWP
  * Description: Handles posting changelog updates from GitHub to a custom post type in WordPress.
- * Version: 1.0
+ * Version: 1.1.0
  * Author: James Welbes
  *
  * @package ReleaseWP
  */
 
 namespace ReleaseWP;
+
+defined( 'ABSPATH' ) || exit;
 
 require_once plugin_dir_path( __FILE__ ) . 'Parsedown.php';
 
@@ -21,7 +23,7 @@ add_action( 'admin_init', __NAMESPACE__ . '\\register_settings' );
  *
  * @return void
  */
-function register_settings_page() {
+function register_settings_page(): void {
 	add_options_page(
 		'ReleaseWP Settings',
 		'ReleaseWP',
@@ -36,14 +38,48 @@ function register_settings_page() {
  *
  * @return void
  */
-function register_settings() {
-	register_setting( 'releasewp_settings', 'releasewp_post_type' );
-	register_setting( 'releasewp_settings', 'releasewp_title_template' );
+function register_settings(): void {
+	register_setting(
+		'releasewp_settings',
+		'releasewp_post_type',
+		array(
+			'type'              => 'string',
+			'sanitize_callback' => __NAMESPACE__ . '\\sanitize_post_type_option',
+			'default'           => 'post',
+		)
+	);
+
+	register_setting(
+		'releasewp_settings',
+		'releasewp_title_template',
+		array(
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_text_field',
+			'default'           => 'Version %version%',
+		)
+	);
+
+	register_setting(
+		'releasewp_settings',
+		'releasewp_webhook_secret',
+		array(
+			'type'              => 'string',
+			'sanitize_callback' => 'sanitize_text_field',
+			'default'           => '',
+		)
+	);
 
 	add_settings_section(
 		'releasewp_main_section',
 		'Post Type Settings',
-		null,
+		'__return_null',
+		'releasewp-settings'
+	);
+
+	add_settings_section(
+		'releasewp_security_section',
+		'Webhook Security',
+		__NAMESPACE__ . '\\render_security_section_description',
 		'releasewp-settings'
 	);
 
@@ -62,6 +98,38 @@ function register_settings() {
 		'releasewp-settings',
 		'releasewp_main_section'
 	);
+
+	add_settings_field(
+		'releasewp_webhook_secret',
+		'Webhook Secret',
+		__NAMESPACE__ . '\\render_webhook_secret_field',
+		'releasewp-settings',
+		'releasewp_security_section'
+	);
+}
+
+/**
+ * Sanitize the post type option — only allow publicly registered post types.
+ *
+ * @param mixed $value The submitted value.
+ * @return string A valid registered public post type slug, or 'post' as fallback.
+ */
+function sanitize_post_type_option( $value ): string {
+	$value      = sanitize_key( (string) $value );
+	$post_types = get_post_types( array( 'public' => true ) );
+	if ( in_array( $value, $post_types, true ) ) {
+		return $value;
+	}
+	return 'post';
+}
+
+/**
+ * Render a description for the security settings section.
+ *
+ * @return void
+ */
+function render_security_section_description(): void {
+	echo '<p>' . esc_html__( 'Configure the shared secret used to verify that incoming webhook requests originate from GitHub.', 'releasewp' ) . '</p>';
 }
 
 /**
@@ -69,8 +137,8 @@ function register_settings() {
  *
  * @return void
  */
-function render_post_type_field() {
-	$selected_post_type = get_option( 'releasewp_post_type', 'post' );
+function render_post_type_field(): void {
+	$selected_post_type = sanitize_key( (string) get_option( 'releasewp_post_type', 'post' ) );
 	$post_types         = get_post_types( array( 'public' => true ), 'objects' );
 
 	echo '<select name="releasewp_post_type" id="releasewp_post_type">';
@@ -83,7 +151,7 @@ function render_post_type_field() {
 		);
 	}
 	echo '</select>';
-	echo '<p class="description">Select the post type where changelog updates will be published.</p>';
+	echo '<p class="description">' . esc_html__( 'Select the post type where changelog updates will be published.', 'releasewp' ) . '</p>';
 }
 
 /**
@@ -91,8 +159,8 @@ function render_post_type_field() {
  *
  * @return void
  */
-function render_title_template_field() {
-	$template = get_option( 'releasewp_title_template', 'Version %version%' );
+function render_title_template_field(): void {
+	$template = sanitize_text_field( (string) get_option( 'releasewp_title_template', 'Version %version%' ) );
 	?>
 	<input type="text"
 		name="releasewp_title_template"
@@ -101,10 +169,32 @@ function render_title_template_field() {
 		class="regular-text"
 		placeholder="e.g., MyPlugin %version% is here!">
 	<p class="description">
-		Use <code>%version%</code> as a placeholder for the version number sent from GitHub.<br>
-		Examples: 
-		<code>MyPlugin %version% is here!</code> or 
+		<?php esc_html_e( 'Use %version% as a placeholder for the version number sent from GitHub.', 'releasewp' ); ?><br>
+		<?php esc_html_e( 'Examples:', 'releasewp' ); ?>
+		<code>MyPlugin %version% is here!</code> <?php esc_html_e( 'or', 'releasewp' ); ?>
 		<code>Version %version% Released</code>
+	</p>
+	<?php
+}
+
+/**
+ * Render the webhook secret input field.
+ *
+ * @return void
+ */
+function render_webhook_secret_field(): void {
+	$secret = (string) get_option( 'releasewp_webhook_secret', '' );
+	?>
+	<input type="password"
+		name="releasewp_webhook_secret"
+		id="releasewp_webhook_secret"
+		value="<?php echo esc_attr( $secret ); ?>"
+		class="regular-text"
+		autocomplete="new-password">
+	<p class="description">
+		<?php esc_html_e( 'Paste the same secret you entered in your GitHub webhook settings. Requests without a valid HMAC-SHA256 signature will be rejected.', 'releasewp' ); ?>
+		<br><strong><?php esc_html_e( 'Endpoint URL:', 'releasewp' ); ?></strong>
+		<code><?php echo esc_url( rest_url( 'releasewp/v1/post-update' ) ); ?></code>
 	</p>
 	<?php
 }
@@ -114,7 +204,7 @@ function render_title_template_field() {
  *
  * @return void
  */
-function render_settings_page() {
+function render_settings_page(): void {
 	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
@@ -132,23 +222,72 @@ function render_settings_page() {
 	<?php
 }
 
-// Hook to handle POST request.
-add_action(
-	'rest_api_init',
-	function () {
-		register_rest_route(
-			'releasewp/v1',
-			'/post-update',
-			array(
-				'methods'              => 'POST',
-				'callback'             => __NAMESPACE__ . '\\handle_changelog_update',
-				'permissions_callback' => function () {
-					return current_user_can( 'edit_posts' );
-				},
-			)
-		);
+// Register the REST endpoint — no user-capability gate; authentication is HMAC-only.
+add_action( 'rest_api_init', __NAMESPACE__ . '\\register_rest_routes' );
+
+/**
+ * Register REST API routes for ReleaseWP.
+ *
+ * @return void
+ */
+function register_rest_routes(): void {
+	register_rest_route(
+		'releasewp/v1',
+		'/post-update',
+		array(
+			'methods'             => 'POST',
+			'callback'            => __NAMESPACE__ . '\\handle_changelog_update',
+			'permission_callback' => '__return_true', // Auth handled via HMAC inside the callback.
+			'args'                => array(
+				'title'   => array(
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => 'sanitize_text_field',
+					'validate_callback' => function ( $value ) {
+						return is_string( $value ) && '' !== trim( $value );
+					},
+				),
+				'content' => array(
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => 'wp_kses_post',
+					'validate_callback' => function ( $value ) {
+						return is_string( $value );
+					},
+				),
+			),
+		)
+	);
+}
+
+/**
+ * Verify a GitHub webhook HMAC-SHA256 signature.
+ *
+ * Reads the X-Hub-Signature-256 header and compares it against a locally
+ * computed HMAC of the raw request body using the stored webhook secret.
+ * Uses hash_equals() to prevent timing attacks.
+ *
+ * @param \WP_REST_Request $request The incoming REST request.
+ * @return bool True when the signature is valid; false otherwise.
+ */
+function verify_webhook_signature( \WP_REST_Request $request ): bool {
+	$secret = (string) get_option( 'releasewp_webhook_secret', '' );
+
+	// If no secret is configured, reject all requests.
+	if ( '' === $secret ) {
+		return false;
 	}
-);
+
+	$signature_header = $request->get_header( 'x-hub-signature-256' );
+	if ( empty( $signature_header ) ) {
+		return false;
+	}
+
+	$body     = $request->get_body();
+	$expected = 'sha256=' . hash_hmac( 'sha256', $body, $secret );
+
+	return hash_equals( $expected, $signature_header );
+}
 
 /**
  * Handle the changelog update POST request.
@@ -156,22 +295,44 @@ add_action(
  * @param \WP_REST_Request $request The REST API request object.
  * @return \WP_REST_Response Response indicating success or failure.
  */
-function handle_changelog_update( \WP_REST_Request $request ) {
-	$title            = $request->get_param( 'title' );
-	$markdown_content = $request->get_param( 'content' );
+function handle_changelog_update( \WP_REST_Request $request ): \WP_REST_Response {
+	// S-001: Verify GitHub webhook HMAC-SHA256 signature.
+	if ( ! verify_webhook_signature( $request ) ) {
+		return new \WP_REST_Response(
+			array( 'message' => 'Forbidden: invalid or missing webhook signature.' ),
+			403
+		);
+	}
 
-	// Convert Markdown to HTML.
+	// A-001: Ensure the calling user (if any) can publish — belt-and-suspenders
+	// guard kept even though HMAC is the primary gate for the GitHub Actions case.
+	// Direct WordPress user calls (e.g. via Application Password) still need this.
+	if ( is_user_logged_in() && ! current_user_can( 'publish_posts' ) ) {
+		return new \WP_REST_Response(
+			array( 'message' => 'Forbidden: insufficient capability.' ),
+			403
+		);
+	}
+
+	// Parameters are already sanitized via the 'args' declaration on the route.
+	$version          = sanitize_text_field( (string) $request->get_param( 'title' ) );
+	$markdown_content = (string) $request->get_param( 'content' );
+
+	// S-002: Enable Parsedown safe mode to block raw HTML pass-through.
 	$parsedown = new \Parsedown();
-	$content   = wp_kses_post( $parsedown->text( $markdown_content ) );
+	$parsedown->setSafeMode( true );
+	$parsedown->setMarkupEscaped( true );
+	$content = wp_kses_post( $parsedown->text( $markdown_content ) );
 
-	// Get the configured post type from settings.
-	$post_type = get_option( 'releasewp_post_type', 'post' );
+	// S-004: get_option value is already validated through register_setting's
+	// sanitize_callback (sanitize_post_type_option), so the stored value is
+	// always a valid registered public post type.
+	$post_type = sanitize_key( (string) get_option( 'releasewp_post_type', 'post' ) );
 
-	// Apply title template (version number is expected from GitHub).
-	$title_template = get_option( 'releasewp_title_template', 'Version %version%' );
-	$title          = str_replace( '%version%', $title, $title_template );
+	// Apply title template.
+	$title_template = sanitize_text_field( (string) get_option( 'releasewp_title_template', 'Version %version%' ) );
+	$title          = str_replace( '%version%', $version, $title_template );
 
-	// Create post array.
 	$new_post = array(
 		'post_title'   => wp_strip_all_tags( $title ),
 		'post_content' => $content,
@@ -179,14 +340,24 @@ function handle_changelog_update( \WP_REST_Request $request ) {
 		'post_type'    => $post_type,
 	);
 
-	// Insert the post into the database and check for errors.
-	$post_id = wp_insert_post( $new_post );
+	// C-001: Pass $wp_error = true so wp_insert_post() returns WP_Error on failure.
+	$post_id = wp_insert_post( $new_post, true );
 
 	if ( is_wp_error( $post_id ) ) {
-		// If there's an error, return a REST response indicating failure.
-		return new \WP_REST_Response( 'Error creating post', 500 );
+		// C-003: Log the actual WP_Error message server-side.
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional server-side logging, not debug code.
+		error_log( '[ReleaseWP] wp_insert_post failed: ' . $post_id->get_error_message() );
+		return new \WP_REST_Response(
+			array( 'message' => 'Error creating post.' ),
+			500
+		);
 	}
 
-	// If successful, return a success message.
-	return new \WP_REST_Response( 'Post Created', 200 );
+	return new \WP_REST_Response(
+		array(
+			'message' => 'Post created.',
+			'post_id' => $post_id,
+		),
+		201
+	);
 }

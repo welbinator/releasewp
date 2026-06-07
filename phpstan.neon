@@ -1,0 +1,14 @@
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - releasewp.php
+    excludePaths:
+        - Parsedown.php
+        - vendor/
+    bootstrapFiles:
+        - vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
+        - Parsedown.php
+    treatPhpDocTypesAsCertain: false

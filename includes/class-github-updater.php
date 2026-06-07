@@ -76,16 +76,30 @@ class GitHub_Updater {
 	 */
 	public function check_for_update( object $transient ): object {
 		if ( empty( $transient->checked ) ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+			error_log( '[ReleaseWP Updater] check_for_update: transient->checked is empty, skipping.' );
 			return $transient;
 		}
 
 		$release = $this->get_release();
 		if ( ! $release ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+			error_log( '[ReleaseWP Updater] check_for_update: get_release() returned null.' );
 			return $transient;
 		}
 
 		$remote_version = ltrim( $release['tag_name'] ?? '', 'v' );
 		$local_version  = $transient->checked[ self::PLUGIN_SLUG ] ?? '0.0.0';
+
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+		error_log(
+			sprintf(
+				'[ReleaseWP Updater] check_for_update: local=%s remote=%s needs_update=%s',
+				$local_version,
+				$remote_version,
+				version_compare( $remote_version, $local_version, '>' ) ? 'yes' : 'no'
+			)
+		);
 
 		if ( ! version_compare( $remote_version, $local_version, '>' ) ) {
 			return $transient;
@@ -93,6 +107,8 @@ class GitHub_Updater {
 
 		$zip_url = $this->find_asset_url( $release, '.zip' );
 		if ( ! $zip_url ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+			error_log( '[ReleaseWP Updater] check_for_update: no .zip asset found in release.' );
 			return $transient;
 		}
 
@@ -232,14 +248,28 @@ class GitHub_Updater {
 			)
 		);
 
-		if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+		if ( is_wp_error( $response ) ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+			error_log( '[ReleaseWP Updater] get_release: wp_remote_get failed — ' . $response->get_error_message() );
+			return null;
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		if ( 200 !== $code ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+			error_log( sprintf( '[ReleaseWP Updater] get_release: GitHub API returned HTTP %d. Body: %s', $code, wp_remote_retrieve_body( $response ) ) );
 			return null;
 		}
 
 		$release = json_decode( wp_remote_retrieve_body( $response ), true );
 		if ( ! is_array( $release ) ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+			error_log( '[ReleaseWP Updater] get_release: failed to decode JSON from GitHub API.' );
 			return null;
 		}
+
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional debug logging.
+		error_log( sprintf( '[ReleaseWP Updater] get_release: fetched release %s, caching for 12h.', $release['tag_name'] ?? '?' ) );
 
 		set_transient( self::TRANSIENT, $release, self::CACHE_TTL );
 		return $release;

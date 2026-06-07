@@ -6,28 +6,45 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to post (e.g. v1.2.0)'
+        description: 'Release tag to post (e.g. v1.2.0) — body is fetched automatically from that GitHub Release'
         required: true
-      body:
-        description: 'Release notes (markdown)'
-        required: false
-        default: ''
 
 jobs:
   post-to-wordpress:
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve release body
+        id: body
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          AUTO_BODY: ${{ github.event.release.body }}
+          AUTO_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            # Manual trigger: fetch body from the existing GitHub Release
+            RELEASE_TAG="$INPUT_TAG"
+            RELEASE_BODY=$(gh release view "$RELEASE_TAG" --json body --jq '.body' 2>/dev/null || echo '')
+          else
+            # Automatic trigger: use the release event data directly
+            RELEASE_TAG="$AUTO_TAG"
+            RELEASE_BODY="$AUTO_BODY"
+          fi
+
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          # Write body to file — safe for multi-line markdown
+          printf '%s' "$RELEASE_BODY" > /tmp/release-body.md
+
       - name: Send release notes to WordPress
         env:
           RELEASEWP_SECRET: ${{ secrets.RELEASEWP_SECRET }}
           RELEASEWP_ENDPOINT: ${{ secrets.RELEASEWP_ENDPOINT }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
-          RELEASE_BODY: ${{ github.event.release.body || github.event.inputs.body }}
+          RELEASE_TAG: ${{ steps.body.outputs.tag }}
         run: |
-          # Write the JSON payload to a file so the signature covers the exact bytes sent
+          # Build JSON payload from the resolved body file
           jq -n \
             --arg title "$RELEASE_TAG" \
-            --arg content "$RELEASE_BODY" \
+            --rawfile content /tmp/release-body.md \
             '{title: $title, content: $content}' > /tmp/payload.json
 
           # Compute HMAC-SHA256 signature over the payload file

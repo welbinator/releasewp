@@ -43,12 +43,11 @@ jobs:
         env:
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-      - name: Resolve tag name
+      - name: Resolve tag and metadata
         id: meta
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          # On tag push, use the pushed ref. On workflow_dispatch, use the input.
           if [ -n "$INPUT_TAG" ]; then
             RAW_TAG="$INPUT_TAG"
           else
@@ -72,6 +71,25 @@ jobs:
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ steps.meta.outputs.version }}"
+          NOTES=$(python3 - <<'PYEOF'
+          import re, sys, os
+          version = os.environ['VERSION']
+          text = open('CHANGELOG.md').read()
+          pattern = rf'## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)'
+          m = re.search(pattern, text, re.DOTALL)
+          print(m.group(1).strip() if m else '')
+          PYEOF
+          )
+          # Write to a file to safely handle multi-line content
+          echo "$NOTES" > /tmp/release-notes.md
+          echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
 
       - name: Install Composer dependencies (no-dev)
         run: composer install --no-interaction --prefer-dist --no-dev
@@ -103,10 +121,10 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          body_path: ${{ steps.changelog.outputs.notes_file }}
           files: |
             ${{ steps.meta.outputs.slug }}.zip
             ${{ steps.meta.outputs.slug }}.zip.sha256
-          generate_release_notes: true
           prerelease: ${{ steps.meta.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

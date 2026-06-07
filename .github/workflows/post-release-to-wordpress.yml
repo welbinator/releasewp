@@ -1,0 +1,31 @@
+name: Post Release to WordPress
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  post-to-wordpress:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send release notes to WordPress
+        env:
+          RELEASEWP_SECRET: ${{ secrets.RELEASEWP_SECRET }}
+          RELEASEWP_ENDPOINT: ${{ secrets.RELEASEWP_ENDPOINT }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          # Write the JSON payload to a file so the signature covers the exact bytes sent
+          jq -n \
+            --arg title "$RELEASE_TAG" \
+            --arg content "$RELEASE_BODY" \
+            '{title: $title, content: $content}' > /tmp/payload.json
+
+          # Compute HMAC-SHA256 signature over the payload file
+          SIGNATURE="sha256=$(openssl dgst -sha256 -hmac "$RELEASEWP_SECRET" /tmp/payload.json | awk '{print $NF}')"
+
+          # POST to WordPress with the signature header
+          curl -sf -X POST "$RELEASEWP_ENDPOINT" \
+            -H "Content-Type: application/json" \
+            -H "X-Hub-Signature-256: $SIGNATURE" \
+            -d @/tmp/payload.json

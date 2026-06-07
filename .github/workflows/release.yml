@@ -1,49 +1,89 @@
-name: Create Release
+name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release Tag'
-        required: true
+  push:
+    tags:
+      - 'v*.*.*'
 
 jobs:
-  build:
+  quality:
+    name: Quality Gate (PHPCS + PHPStan)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-    - name: Create temporary directory
-      run: |
-        mkdir temp_dir
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
 
-    - name: Copy files to temporary directory
-      run: |
-        find . -maxdepth 1 -not -name 'temp_dir' -not -name '.' -not -name '.git' -not -name '.github' -exec cp -r {} temp_dir/ \;
+      - name: Run PHPCS
+        run: ./vendor/bin/phpcs -q --report=full
 
-    - name: Rename directory
-      run: |
-        mv temp_dir releasewp
+      - name: Run PHPStan
+        run: ./vendor/bin/phpstan analyse --no-progress
 
-    - name: Zip the folder
-      run: |
-        zip -r releasewp-${{ github.event.inputs.tag }}.zip releasewp \
-        -x "*.git/*" "*.github/*" \
-        "releasewp/composer.json" "releasewp/composer.lock" \
-        "releasewp/package.json" "releasewp/package-lock.json" \
-        "releasewp/phpstan.neon" "releasewp/phpstan-baseline.neon" \
-        "releasewp/postcss.config.js" "releasewp/tailwind.config.js" \
-        "releasewp/gutenberg-market.php" "releasewp/.gitignore" \
-        "releasewp/webpack.config.js" "releasewp/src/*"
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    needs: quality
+    permissions:
+      contents: write
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: releasewp-${{ github.event.inputs.tag }}.zip
-        tag_name: ${{ github.event.inputs.tag }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-permissions:
-  contents: write
+      - name: Set plugin slug and version
+        id: meta
+        run: |
+          SLUG=$(basename "$GITHUB_REPOSITORY")
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "slug=$SLUG"    >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_NAME" =~ -(alpha|beta|rc) ]]; then
+            echo "prerelease=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Composer dependencies (no-dev)
+        run: composer install --no-interaction --prefer-dist --no-dev
+
+      - name: Build zip and checksum
+        run: |
+          SLUG="${{ steps.meta.outputs.slug }}"
+          cd ..
+          zip -r "${SLUG}.zip" "${SLUG}" \
+            --exclude "*/.git/*" \
+            --exclude "*/.github/*" \
+            --exclude "*/tests/*" \
+            --exclude "*/node_modules/*" \
+            --exclude "*/phpstan.neon" \
+            --exclude "*/phpstan-baseline.neon" \
+            --exclude "*/.phpcs.xml.dist" \
+            --exclude "*/composer.json" \
+            --exclude "*/composer.lock" \
+            --exclude "*/package*.json" \
+            --exclude "*/wp-tests-config.php" \
+            --exclude "*/.env" \
+            --exclude "*/.env.*" \
+            --exclude "*/.npmrc" \
+            --exclude "*/.gitignore"
+          sha256sum "${SLUG}.zip" > "${SLUG}.zip.sha256"
+          mv "${SLUG}.zip" "${SLUG}.zip.sha256" "${SLUG}/"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            ${{ steps.meta.outputs.slug }}.zip
+            ${{ steps.meta.outputs.slug }}.zip.sha256
+          generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

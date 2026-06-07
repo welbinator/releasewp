@@ -71,7 +71,7 @@ function register_settings(): void {
 		'releasewp_webhook_secret',
 		array(
 			'type'              => 'string',
-			'sanitize_callback' => 'sanitize_text_field',
+			'sanitize_callback' => __NAMESPACE__ . '\\sanitize_webhook_secret',
 			'default'           => '',
 		)
 	);
@@ -204,12 +204,34 @@ function render_title_template_field(): void {
 }
 
 /**
+ * Sanitize the webhook secret option.
+ *
+ * If the submitted value is blank (e.g. the password field was cleared by
+ * a browser autofill or a form save without touching the field), keep the
+ * existing stored value so a settings save never accidentally wipes the secret.
+ *
+ * @param mixed $value The submitted value.
+ * @return string The sanitized secret, or the current stored value if blank.
+ */
+function sanitize_webhook_secret( $value ): string {
+	$clean = sanitize_text_field( (string) $value );
+	if ( '' === $clean ) {
+		// Blank submission — preserve whatever is already stored.
+		return (string) get_option( 'releasewp_webhook_secret', '' );
+	}
+	return $clean;
+}
+
+/**
  * Render the webhook secret input field.
  *
  * @return void
  */
 function render_webhook_secret_field(): void {
-	$secret = (string) get_option( 'releasewp_webhook_secret', '' );
+	$secret      = (string) get_option( 'releasewp_webhook_secret', '' );
+	$fingerprint = '' !== $secret
+		? substr( hash( 'sha256', $secret ), 0, 16 )
+		: '';
 	?>
 	<input type="password"
 		name="releasewp_webhook_secret"
@@ -243,6 +265,11 @@ function render_webhook_secret_field(): void {
 		<?php esc_html_e( 'Paste the same secret you entered in your GitHub webhook settings. Requests without a valid HMAC-SHA256 signature will be rejected.', 'releasewp' ); ?>
 		<br><strong><?php esc_html_e( 'Endpoint URL:', 'releasewp' ); ?></strong>
 		<code><?php echo esc_url( rest_url( 'releasewp/v1/post-update' ) ); ?></code>
+		<?php if ( '' !== $fingerprint ) : ?>
+			<br><strong><?php esc_html_e( 'Secret fingerprint (first 16 chars of SHA-256):', 'releasewp' ); ?></strong>
+			<code id="rwp-secret-fingerprint"><?php echo esc_html( $fingerprint ); ?></code>
+			<small> — <?php esc_html_e( 'Compare this against the "Secret fingerprint" shown in the GitHub Actions log to confirm they match.', 'releasewp' ); ?></small>
+		<?php endif; ?>
 	</p>
 	<?php
 }

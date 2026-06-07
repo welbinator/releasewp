@@ -12,24 +12,37 @@ on:
 jobs:
   post-to-wordpress:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Resolve release body
         id: body
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_TAG: ${{ github.event.inputs.tag }}
-          AUTO_BODY: ${{ github.event.release.body }}
           AUTO_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [ -n "$INPUT_TAG" ]; then
-            # Manual trigger: fetch body from the existing GitHub Release
-            RELEASE_TAG="$INPUT_TAG"
-            RELEASE_BODY=$(gh release view "$RELEASE_TAG" --json body --jq '.body' 2>/dev/null || echo '')
-          else
-            # Automatic trigger: use the release event data directly
-            RELEASE_TAG="$AUTO_TAG"
-            RELEASE_BODY="$AUTO_BODY"
+          # Prefer the manual input tag; fall back to the event tag.
+          RELEASE_TAG="${INPUT_TAG:-$AUTO_TAG}"
+          echo "Resolved tag: $RELEASE_TAG"
+
+          # Always fetch the body from the GitHub Releases API — avoids
+          # multi-line env-var expansion issues with the auto trigger.
+          RELEASE_BODY=$(gh release view "$RELEASE_TAG" --json body --jq '.body')
+          GH_EXIT=$?
+
+          if [ $GH_EXIT -ne 0 ]; then
+            echo "ERROR: 'gh release view $RELEASE_TAG' failed (exit $GH_EXIT)"
+            exit 1
           fi
+
+          if [ -z "$RELEASE_BODY" ]; then
+            echo "ERROR: Release body for $RELEASE_TAG is empty — nothing to post."
+            exit 1
+          fi
+
+          echo "Body length: ${#RELEASE_BODY} chars"
+          echo "Body preview: ${RELEASE_BODY:0:120}..."
 
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           # Write body to file — safe for multi-line markdown
@@ -41,6 +54,14 @@ jobs:
           RELEASEWP_ENDPOINT: ${{ secrets.RELEASEWP_ENDPOINT }}
           RELEASE_TAG: ${{ steps.body.outputs.tag }}
         run: |
+          # Confirm the body file has content before proceeding.
+          BODY_SIZE=$(wc -c < /tmp/release-body.md)
+          echo "Body file size: $BODY_SIZE bytes"
+          if [ "$BODY_SIZE" -eq 0 ]; then
+            echo "ERROR: /tmp/release-body.md is empty — aborting."
+            exit 1
+          fi
+
           # Build JSON payload from the resolved body file
           jq -n \
             --arg title "$RELEASE_TAG" \
@@ -49,12 +70,6 @@ jobs:
 
           echo "Payload title: $RELEASE_TAG"
           echo "Payload size: $(wc -c < /tmp/payload.json) bytes"
-
-          # Debug: print secret length + a hash of the secret (not the secret itself)
-          SECRET_LEN=${#RELEASEWP_SECRET}
-          SECRET_HASH=$(printf '%s' "$RELEASEWP_SECRET" | sha256sum | cut -c1-16)
-          echo "Secret length: $SECRET_LEN chars"
-          echo "Secret fingerprint (sha256 of secret, first 16 chars): $SECRET_HASH"
 
           # Compute HMAC-SHA256 signature over the payload file
           SIGNATURE="sha256=$(openssl dgst -sha256 -hmac "$RELEASEWP_SECRET" /tmp/payload.json | awk '{print $NF}')"

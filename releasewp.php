@@ -450,6 +450,11 @@ YAML;
 				var step2num = document.getElementById('rwp-step2-status');
 
 				btn.addEventListener('click', function() {
+					if (<?php echo $has_secret ? 'true' : 'false'; ?>) {
+						if ( ! confirm( <?php echo wp_json_encode( __( "Generating a new secret will invalidate your current one.\n\nYou will need to update RELEASEWP_SECRET in your GitHub repository secrets before webhooks will work again.\n\nContinue?", 'releasewp' ) ); ?> ) ) {
+							return;
+						}
+					}
 					btn.disabled    = true;
 					spinner.style.visibility = 'visible';
 					errorEl.style.display    = 'none';

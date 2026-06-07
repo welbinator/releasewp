@@ -47,11 +47,24 @@ jobs:
             --rawfile content /tmp/release-body.md \
             '{title: $title, content: $content}' > /tmp/payload.json
 
+          echo "Payload title: $RELEASE_TAG"
+          echo "Payload size: $(wc -c < /tmp/payload.json) bytes"
+
           # Compute HMAC-SHA256 signature over the payload file
           SIGNATURE="sha256=$(openssl dgst -sha256 -hmac "$RELEASEWP_SECRET" /tmp/payload.json | awk '{print $NF}')"
 
-          # POST to WordPress with the signature header
-          curl -sf -X POST "$RELEASEWP_ENDPOINT" \
+          echo "Signature prefix: ${SIGNATURE:0:20}..."
+
+          # POST to WordPress — show response body and status code on failure
+          HTTP_STATUS=$(curl -s -o /tmp/wp-response.txt -w "%{http_code}" -X POST "$RELEASEWP_ENDPOINT" \
             -H "Content-Type: application/json" \
             -H "X-Hub-Signature-256: $SIGNATURE" \
-            -d @/tmp/payload.json
+            -d @/tmp/payload.json)
+
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Response: $(cat /tmp/wp-response.txt)"
+
+          if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
+            echo "ERROR: WordPress returned HTTP $HTTP_STATUS"
+            exit 1
+          fi

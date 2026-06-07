@@ -50,6 +50,12 @@ jobs:
           echo "Payload title: $RELEASE_TAG"
           echo "Payload size: $(wc -c < /tmp/payload.json) bytes"
 
+          # Debug: print secret length + a hash of the secret (not the secret itself)
+          SECRET_LEN=${#RELEASEWP_SECRET}
+          SECRET_HASH=$(printf '%s' "$RELEASEWP_SECRET" | sha256sum | cut -c1-16)
+          echo "Secret length: $SECRET_LEN chars"
+          echo "Secret fingerprint (sha256 of secret, first 16 chars): $SECRET_HASH"
+
           # Compute HMAC-SHA256 signature over the payload file
           SIGNATURE="sha256=$(openssl dgst -sha256 -hmac "$RELEASEWP_SECRET" /tmp/payload.json | awk '{print $NF}')"
 

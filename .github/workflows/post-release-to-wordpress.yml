@@ -65,7 +65,7 @@ jobs:
           HTTP_STATUS=$(curl -s -o /tmp/wp-response.txt -w "%{http_code}" -X POST "$RELEASEWP_ENDPOINT" \
             -H "Content-Type: application/json" \
             -H "X-Hub-Signature-256: $SIGNATURE" \
-            -d @/tmp/payload.json)
+            --data-binary @/tmp/payload.json)
 
           echo "HTTP Status: $HTTP_STATUS"
           echo "Response: $(cat /tmp/wp-response.txt)"

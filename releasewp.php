@@ -18,6 +18,9 @@ require_once plugin_dir_path( __FILE__ ) . 'Parsedown.php';
 add_action( 'admin_menu', __NAMESPACE__ . '\\register_settings_page' );
 add_action( 'admin_init', __NAMESPACE__ . '\\register_settings' );
 
+// AJAX: generate and save a webhook secret.
+add_action( 'wp_ajax_releasewp_generate_secret', __NAMESPACE__ . '\\ajax_generate_secret' );
+
 /**
  * Register the settings page in WordPress admin menu.
  *
@@ -121,6 +124,25 @@ function sanitize_post_type_option( $value ): string {
 		return $value;
 	}
 	return 'post';
+}
+
+/**
+ * AJAX handler: generate a cryptographically secure webhook secret, save it,
+ * and return it to the browser so the Setup Guide can display it immediately.
+ *
+ * @return void
+ */
+function ajax_generate_secret(): void {
+	check_ajax_referer( 'releasewp_generate_secret', 'nonce' );
+
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_send_json_error( array( 'message' => 'Insufficient permissions.' ), 403 );
+	}
+
+	$secret = bin2hex( random_bytes( 32 ) );
+	update_option( 'releasewp_webhook_secret', $secret );
+
+	wp_send_json_success( array( 'secret' => $secret ) );
 }
 
 /**
@@ -395,9 +417,81 @@ YAML;
 
 		<div class="rwp-step">
 			<h3><span class="rwp-num">1</span><?php esc_html_e( 'Generate a webhook secret', 'releasewp' ); ?></h3>
-			<p><?php esc_html_e( 'You need a long, random string that only you know. Your GitHub Actions workflow will use it to sign each request; WordPress uses it to verify the signature. Run this in any terminal to generate one:', 'releasewp' ); ?></p>
-			<div class="rwp-code">openssl rand -hex 32</div>
-			<div class="rwp-tip"><?php esc_html_e( 'Copy the output — you will paste it in the next two steps.', 'releasewp' ); ?></div>
+			<p><?php esc_html_e( 'Click the button below to generate a secure secret and save it to WordPress automatically. You will need to copy it into your GitHub repository secrets in Step 3.', 'releasewp' ); ?></p>
+			<div style="display:flex; align-items:center; gap:10px; margin:12px 0 4px;">
+				<button type="button" id="rwp-generate-btn" class="button button-primary">
+					<?php esc_html_e( 'Generate Secret', 'releasewp' ); ?>
+				</button>
+				<span id="rwp-generate-spinner" class="spinner" style="float:none; margin:0; visibility:hidden;"></span>
+			</div>
+			<div id="rwp-secret-result" style="display:none; margin-top:10px;">
+				<p style="margin:0 0 6px;"><strong><?php esc_html_e( 'Your secret (copy this now):', 'releasewp' ); ?></strong></p>
+				<div style="display:flex; align-items:center; gap:8px;">
+					<code id="rwp-secret-value" class="rwp-ic" style="font-size:13px; padding:6px 10px; user-select:all;"></code>
+					<button type="button" id="rwp-copy-btn" class="button">
+						<?php esc_html_e( 'Copy', 'releasewp' ); ?>
+					</button>
+				</div>
+				<div class="rwp-tip" style="margin-top:8px;"><?php esc_html_e( 'This secret has been saved to WordPress. Keep a copy of it — you will paste it into GitHub in Step 3.', 'releasewp' ); ?></div>
+			</div>
+			<div id="rwp-generate-error" class="rwp-warn" style="display:none; margin-top:10px;"></div>
+			<script>
+			(function() {
+				var btn      = document.getElementById('rwp-generate-btn');
+				var spinner  = document.getElementById('rwp-generate-spinner');
+				var result   = document.getElementById('rwp-secret-result');
+				var valueEl  = document.getElementById('rwp-secret-value');
+				var copyBtn  = document.getElementById('rwp-copy-btn');
+				var errorEl  = document.getElementById('rwp-generate-error');
+				var step2num = document.getElementById('rwp-step2-status');
+
+				btn.addEventListener('click', function() {
+					btn.disabled    = true;
+					spinner.style.visibility = 'visible';
+					errorEl.style.display    = 'none';
+					result.style.display     = 'none';
+
+					var data = new FormData();
+					data.append('action', 'releasewp_generate_secret');
+					data.append('nonce', <?php echo wp_json_encode( wp_create_nonce( 'releasewp_generate_secret' ) ); ?>);
+
+					fetch(<?php echo wp_json_encode( admin_url( 'admin-ajax.php' ) ); ?>, {
+						method: 'POST',
+						credentials: 'same-origin',
+						body: data,
+					})
+					.then(function(r) { return r.json(); })
+					.then(function(r) {
+						if (r.success) {
+							valueEl.textContent      = r.data.secret;
+							result.style.display     = 'block';
+							if (step2num) { step2num.style.display = 'inline'; }
+							var warn = document.getElementById('rwp-step2-warn');
+							if (warn) { warn.style.display = 'none'; }
+						} else {
+							errorEl.textContent      = r.data && r.data.message ? r.data.message : '<?php echo esc_js( __( 'An error occurred. Please try again.', 'releasewp' ) ); ?>';
+							errorEl.style.display    = 'block';
+						}
+					})
+					.catch(function() {
+						errorEl.textContent   = '<?php echo esc_js( __( 'Request failed. Please check your connection and try again.', 'releasewp' ) ); ?>';
+						errorEl.style.display = 'block';
+					})
+					.finally(function() {
+						btn.disabled = false;
+						spinner.style.visibility = 'hidden';
+					});
+				});
+
+				copyBtn.addEventListener('click', function() {
+					navigator.clipboard.writeText(valueEl.textContent).then(function() {
+						var orig = copyBtn.textContent;
+						copyBtn.textContent = '<?php echo esc_js( __( 'Copied!', 'releasewp' ) ); ?>';
+						setTimeout(function() { copyBtn.textContent = orig; }, 2000);
+					});
+				});
+			}());
+			</script>
 		</div>
 
 		<div class="rwp-step">
@@ -405,16 +499,16 @@ YAML;
 				<span class="rwp-num">2</span>
 				<?php esc_html_e( 'Save the secret in WordPress', 'releasewp' ); ?>
 				<?php if ( $has_secret ) : ?>
-					<span class="rwp-done">&#10003; <?php esc_html_e( 'Done', 'releasewp' ); ?></span>
+					<span class="rwp-done" id="rwp-step2-status">&#10003; <?php esc_html_e( 'Done', 'releasewp' ); ?></span>
+				<?php else : ?>
+					<span class="rwp-done" id="rwp-step2-status" style="display:none;">&#10003; <?php esc_html_e( 'Done', 'releasewp' ); ?></span>
 				<?php endif; ?>
 			</h3>
-			<p>
-				<?php esc_html_e( 'Open the', 'releasewp' ); ?>
-				<a href="<?php echo esc_url( $settings_url ); ?>"><?php esc_html_e( 'Settings tab', 'releasewp' ); ?></a>
-				<?php esc_html_e( 'and paste your secret into the Webhook Secret field, then click Save Settings.', 'releasewp' ); ?>
+			<p><?php esc_html_e( 'Clicking Generate Secret in Step 1 saves the secret to WordPress automatically. You can also set it manually on the', 'releasewp' ); ?>
+				<a href="<?php echo esc_url( $settings_url ); ?>"><?php esc_html_e( 'Settings tab', 'releasewp' ); ?></a>.
 			</p>
 			<?php if ( ! $has_secret ) : ?>
-				<div class="rwp-warn"><?php esc_html_e( 'No secret saved yet. The endpoint will reject all requests until a secret is configured.', 'releasewp' ); ?></div>
+				<div class="rwp-warn" id="rwp-step2-warn"><?php esc_html_e( 'No secret saved yet. The endpoint will reject all requests until a secret is configured.', 'releasewp' ); ?></div>
 			<?php endif; ?>
 		</div>
 

@@ -3,6 +3,13 @@
 All notable changes to ReleaseWP are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.1] - 2026-06-07
+
+### Fixed
+- Webhook post content was empty on first delivery — release body is now always fetched via `gh release view` API instead of relying on the GitHub Actions event env var, which silently mangled multi-line markdown.
+- Saving the Settings page with an empty webhook secret field no longer wipes the stored secret (blank submissions are now ignored).
+- Settings page now shows a secret fingerprint (first 16 chars of SHA-256) so you can confirm the stored secret matches `RELEASEWP_SECRET` in GitHub repo secrets without exposing the raw value.
+
 ## [1.2.0] - 2026-06-07
 
 ### Added

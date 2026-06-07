@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ReleaseWP
  * Description: Handles posting changelog updates from GitHub to a custom post type in WordPress.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: James Welbes
  *
  * @package ReleaseWP
@@ -13,6 +13,10 @@ namespace ReleaseWP;
 defined( 'ABSPATH' ) || exit;
 
 require_once plugin_dir_path( __FILE__ ) . 'Parsedown.php';
+require_once plugin_dir_path( __FILE__ ) . 'includes/class-github-updater.php';
+
+// Boot the GitHub Releases updater (runs outside admin_init — hooks early).
+new GitHub_Updater();
 
 // Register settings page.
 add_action( 'admin_menu', __NAMESPACE__ . '\\register_settings_page' );

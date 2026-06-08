@@ -35,6 +35,12 @@ jobs:
     name: Build & Publish Release
     runs-on: ubuntu-latest
     needs: quality
+    # CFG-007: 'production' environment enforces required-reviewer approval gate
+    # for manual workflow_dispatch runs. Configure reviewers at:
+    # Settings → Environments → production → Required reviewers.
+    # Tag-push (automated) runs are gated only by the quality job (intentional —
+    # tags should already be reviewed before being pushed).
+    environment: ${{ github.event_name == 'workflow_dispatch' && 'production' || '' }}
     permissions:
       contents: write
 

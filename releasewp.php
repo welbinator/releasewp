@@ -704,7 +704,51 @@ function verify_webhook_signature( \WP_REST_Request $request ): bool {
  * @param \WP_REST_Request $request The REST API request object.
  * @return \WP_REST_Response Response indicating success or failure.
  */
+/**
+ * S-005: Rate-limit webhook endpoint to 10 requests per hour by source IP.
+ *
+ * Uses a transient keyed by a hash of the client IP. Returns true when the
+ * limit has been exceeded, false when the request is within budget.
+ *
+ * @return bool True if the request should be rejected (rate limit exceeded).
+ */
+function is_rate_limited(): bool {
+	$ip  = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( (string) $_SERVER['REMOTE_ADDR'] ) ) : 'unknown';
+	$key = 'releasewp_rl_' . hash( 'sha256', $ip );
+
+	$count = (int) get_transient( $key );
+	if ( $count >= 10 ) {
+		return true;
+	}
+
+	// Increment; set expiry on first hit only (preserves the rolling 1-hour window).
+	if ( 0 === $count ) {
+		set_transient( $key, 1, HOUR_IN_SECONDS );
+	} else {
+		set_transient( $key, $count + 1, 0 ); // 0 = keep existing expiry.
+	}
+
+	return false;
+}
+
+/**
+ * Handle incoming changelog update from GitHub webhook.
+ *
+ * Validates the HMAC signature, rate-limits by IP, then creates a WordPress
+ * post from the supplied title and markdown content.
+ *
+ * @param \WP_REST_Request $request The REST API request object.
+ * @return \WP_REST_Response Response indicating success or failure.
+ */
 function handle_changelog_update( \WP_REST_Request $request ): \WP_REST_Response {
+	// S-005: Enforce rate limit before any further processing.
+	if ( is_rate_limited() ) {
+		return new \WP_REST_Response(
+			array( 'message' => 'Too many requests. Please try again later.' ),
+			429
+		);
+	}
+
 	// S-001: Verify GitHub webhook HMAC-SHA256 signature.
 	if ( ! verify_webhook_signature( $request ) ) {
 		return new \WP_REST_Response(

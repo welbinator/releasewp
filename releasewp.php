@@ -668,32 +668,38 @@ function verify_webhook_signature( \WP_REST_Request $request ): bool {
 
 	// If no secret is configured, reject all requests.
 	if ( '' === $secret ) {
-		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional server-side debug logging.
-		error_log( '[ReleaseWP] verify_webhook_signature: no secret configured.' );
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- debug-gated diagnostic logging.
+			error_log( '[ReleaseWP] verify_webhook_signature: no secret configured.' );
+		}
 		return false;
 	}
 
 	$signature_header = $request->get_header( 'x-hub-signature-256' );
 	if ( empty( $signature_header ) ) {
-		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional server-side debug logging.
-		error_log( '[ReleaseWP] verify_webhook_signature: no X-Hub-Signature-256 header received.' );
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- debug-gated diagnostic logging.
+			error_log( '[ReleaseWP] verify_webhook_signature: no X-Hub-Signature-256 header received.' );
+		}
 		return false;
 	}
 
 	$body     = $request->get_body();
 	$expected = 'sha256=' . hash_hmac( 'sha256', $body, $secret );
 
-	// Log partial values for debugging — first 20 chars of each signature only.
-	// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- intentional server-side debug logging.
-	error_log(
-		sprintf(
-			'[ReleaseWP] verify_webhook_signature: secret_length=%d body_length=%d expected=%.20s... received=%.20s...',
-			strlen( $secret ),
-			strlen( $body ),
-			$expected,
-			$signature_header
-		)
-	);
+	if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+		// Log partial values for debugging — first 20 chars of each signature only.
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- debug-gated diagnostic logging.
+		error_log(
+			sprintf(
+				'[ReleaseWP] verify_webhook_signature: secret_length=%d body_length=%d expected=%.20s... received=%.20s...',
+				strlen( $secret ),
+				strlen( $body ),
+				$expected,
+				$signature_header
+			)
+		);
+	}
 
 	return hash_equals( $expected, $signature_header );
 }
